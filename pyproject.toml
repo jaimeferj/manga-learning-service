@@ -1,0 +1,55 @@
+[project]
+name = "manga-learning-service"
+version = "0.1.0"
+description = "OCR + Anki + AI learning sidecar for the Suwayomi WebUI Japanese-learning fork."
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.11",
+    "aiosqlite>=0.20",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "mokuro>=0.2.0",
+    "pillow>=11",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "uvicorn[standard]>=0.32",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+]
+
+[project.scripts]
+manga-learning-service = "manga_learning_service.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/manga_learning_service"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = ["mokuro"]
+ignore_missing_imports = true
