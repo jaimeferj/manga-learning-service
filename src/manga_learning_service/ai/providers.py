@@ -14,17 +14,27 @@ def _default_client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout)
 
 
-class OpenAiProvider(AiProvider):
-    name = "openai"
+class _OpenAiCompatibleProvider(AiProvider):
+    name: str
 
     def __init__(
         self,
-        settings: Settings,
         *,
+        name: str,
+        base_url: str,
+        api_key: str,
+        model: str,
+        api_key_env: str,
+        timeout_seconds: float = 30.0,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self._settings = settings
-        self._client = client
+        self.name = name
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model = model
+        self.api_key_env = api_key_env
+        self.timeout_seconds = timeout_seconds
+        self.client = client
 
     async def complete(
         self,
@@ -34,14 +44,14 @@ class OpenAiProvider(AiProvider):
         temperature: float = 0.2,
         max_tokens: int = 600,
     ) -> str:
-        if not self._settings.ai_openai_api_key:
-            raise RuntimeError("MANGA_LEARNING_AI_OPENAI_API_KEY not set")
+        if not self.api_key:
+            raise RuntimeError(f"{self.name} API key not set ({self.api_key_env})")
         headers = {
-            "Authorization": f"Bearer {self._settings.ai_openai_api_key}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         body = {
-            "model": self._settings.ai_openai_model,
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -49,11 +59,11 @@ class OpenAiProvider(AiProvider):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        client = self._client or _default_client(30.0)
-        owns_client = self._client is None
+        client = self.client or _default_client(self.timeout_seconds)
+        owns_client = self.client is None
         try:
             response = await client.post(
-                "https://api.openai.com/v1/chat/completions",
+                f"{self.base_url.rstrip('/')}/chat/completions",
                 headers=headers,
                 json=body,
             )
@@ -64,19 +74,38 @@ class OpenAiProvider(AiProvider):
         data = response.json()
         choices = data.get("choices") or []
         if not choices:
-            raise RuntimeError("openai returned no choices")
+            raise RuntimeError(f"{self.name} returned no choices")
         return str(choices[0]["message"]["content"]).strip()
+
+
+class MinimaxProvider(_OpenAiCompatibleProvider):
+    def __init__(self, settings: Settings, *, client: httpx.AsyncClient | None = None) -> None:
+        super().__init__(
+            name="minimax",
+            base_url=settings.ai_minimax_base_url,
+            api_key=settings.ai_minimax_api_key,
+            model=settings.ai_minimax_model,
+            api_key_env="MANGA_LEARNING_AI_MINIMAX_API_KEY",
+            client=client,
+        )
+
+
+class OpenAiProvider(_OpenAiCompatibleProvider):
+    def __init__(self, settings: Settings, *, client: httpx.AsyncClient | None = None) -> None:
+        super().__init__(
+            name="openai",
+            base_url=settings.ai_openai_base_url,
+            api_key=settings.ai_openai_api_key,
+            model=settings.ai_openai_model,
+            api_key_env="MANGA_LEARNING_AI_OPENAI_API_KEY",
+            client=client,
+        )
 
 
 class OllamaProvider(AiProvider):
     name = "ollama"
 
-    def __init__(
-        self,
-        settings: Settings,
-        *,
-        client: httpx.AsyncClient | None = None,
-    ) -> None:
+    def __init__(self, settings: Settings, *, client: httpx.AsyncClient | None = None) -> None:
         self._settings = settings
         self._client = client
 
@@ -115,6 +144,8 @@ class OllamaProvider(AiProvider):
 
 
 def build_provider(settings: Settings) -> AiProvider:
+    if settings.ai_provider == "minimax":
+        return MinimaxProvider(settings)
     if settings.ai_provider == "openai":
         return OpenAiProvider(settings)
     if settings.ai_provider == "ollama":

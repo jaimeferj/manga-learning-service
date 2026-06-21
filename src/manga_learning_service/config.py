@@ -23,12 +23,19 @@ class Settings(BaseSettings):
     anki_connect_url: str = "http://127.0.0.1:8765"
     anki_enabled: bool = False
 
-    ai_provider: str = "openai"
+    ai_provider: str = "minimax"
+    ai_enabled: bool = False
+
+    ai_minimax_api_key: str = ""
+    ai_minimax_base_url: str = "https://api.minimax.io/v1"
+    ai_minimax_model: str = "MiniMax-M3"
+
     ai_openai_api_key: str = ""
     ai_openai_model: str = "gpt-4o-mini"
+    ai_openai_base_url: str = "https://api.openai.com/v1"
+
     ai_ollama_url: str = "http://127.0.0.1:11434"
     ai_ollama_model: str = "llama3.1"
-    ai_enabled: bool = False
 
 
 def get_settings() -> Settings:
