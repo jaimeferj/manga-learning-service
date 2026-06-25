@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     ocr_force_cpu: bool = True
     ocr_max_image_bytes: int = 50 * 1024 * 1024
     ocr_concurrency: int = 1
+    manga_server_url: str = ""
+    ocr_page_ratio_min: float = 1.25
+    ocr_page_ratio_max: float = 1.85
+    ocr_min_pages: int = 8
+    ocr_max_pages: int = 25
+    ocr_virtual_page_overlap: float = 0.1
+    ocr_iou_dedup_threshold: float = 0.5
 
     anki_connect_url: str = "http://127.0.0.1:8765"
     anki_enabled: bool = False

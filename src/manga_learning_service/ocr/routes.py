@@ -5,12 +5,13 @@ import io as _io
 import logging
 from typing import Any, cast
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request, status
 from PIL import Image as PILImage
 
 from manga_learning_service.cache.keys import PageIdentity, hash_bytes
 from manga_learning_service.config import get_settings
-from manga_learning_service.ocr.service import OcrEngine, decode_image, engine_factory
+from manga_learning_service.ocr.service import OcrEngine, decode_image_async, engine_factory
 from manga_learning_service.ocr.types import (
     OcrLine,
     OcrPageRequest,
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 _engine_lock = asyncio.Lock()
 _engine: OcrEngine | None = None
+_http_client: httpx.AsyncClient | None = None
+_http_client_lock = asyncio.Lock()
 
 
 async def get_engine() -> OcrEngine:
@@ -36,6 +39,22 @@ async def get_engine() -> OcrEngine:
             _engine = engine_factory(settings.ocr_backend, force_cpu=settings.ocr_force_cpu)
             await asyncio.to_thread(_engine.load)
     return _engine
+
+
+async def get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    async with _http_client_lock:
+        if _http_client is None:
+            _http_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+        return _http_client
+
+
+async def close_http_client() -> None:
+    global _http_client
+    async with _http_client_lock:
+        if _http_client is not None:
+            await _http_client.aclose()
+            _http_client = None
 
 
 def to_jsonable(value: Any) -> Any:
@@ -102,9 +121,17 @@ async def ocr_page(payload: OcrPageRequest, request: Request) -> OcrPageResult:
     engine = await get_engine()
 
     try:
-        image_bytes = decode_image(payload.image_base64, payload.image_url)
+        http_client = await get_http_client()
+        image_bytes = await decode_image_async(
+            payload.image_base64,
+            payload.image_url,
+            http_client=http_client,
+            manga_server_url=settings.manga_server_url,
+        )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"failed to fetch image_url: {exc}") from exc
 
     if len(image_bytes) > settings.ocr_max_image_bytes:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "image too large")
@@ -161,10 +188,19 @@ async def ocr_page(payload: OcrPageRequest, request: Request) -> OcrPageResult:
 @router.post("/recognize-region", response_model=OcrRegionResult)
 async def ocr_region(payload: OcrRegionRequest) -> OcrRegionResult:
     engine = await get_engine()
+    settings = get_settings()
     try:
-        image_bytes = decode_image(payload.image_base64, payload.image_url)
+        http_client = await get_http_client()
+        image_bytes = await decode_image_async(
+            payload.image_base64,
+            payload.image_url,
+            http_client=http_client,
+            manga_server_url=settings.manga_server_url,
+        )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"failed to fetch image_url: {exc}") from exc
 
     if not engine.ready:
         raise HTTPException(
