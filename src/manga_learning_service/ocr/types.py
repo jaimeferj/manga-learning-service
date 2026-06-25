@@ -20,6 +20,8 @@ class OcrLine(BaseModel):
     forcedOrientation: Literal["horizontal", "vertical"]
     isMerged: bool = False
 
+    model_config = ConfigDict(extra="allow")
+
 
 class OcrPageRequest(BaseModel):
     image_base64: str | None = None

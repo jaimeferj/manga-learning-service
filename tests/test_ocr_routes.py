@@ -112,6 +112,11 @@ def test_ocr_page_returns_normalized_lines(client: TestClient, monkeypatch) -> N
     assert first["tightBoundingBox"]["y"] == 0.0
     assert first["tightBoundingBox"]["width"] == pytest.approx(0.5)
     assert first["tightBoundingBox"]["height"] == pytest.approx(200 / 1200)
+    assert first["sourceLines"] == ["こんにちは"]
+    assert first["fontSize"] == pytest.approx(24.0)
+    assert first["blockFontSize"] == pytest.approx(24.0)
+    assert "lineCoords" in first
+    assert first["lineCoords"][0][0] == pytest.approx((0.0, 0.0))
     assert data["cached"] is False
 
 

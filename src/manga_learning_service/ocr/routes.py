@@ -87,17 +87,40 @@ def map_mokuro_blocks(result: dict[str, Any]) -> list[dict[str, Any]]:
             "height": max(0.0, min(1.0, (float(y1) - float(y0)) / img_h)),
         }
         orientation = "vertical" if bool(blk.get("vertical", False)) else "horizontal"
-        text = " ".join(str(t) for t in blk.get("lines", [])).strip()
+        raw_lines = blk.get("lines")
+        text = " ".join(str(t) for t in raw_lines).strip() if isinstance(raw_lines, list) else ""
         if not text:
             continue
-        lines.append(
-            {
-                "text": text,
-                "tightBoundingBox": tight,
-                "forcedOrientation": orientation,
-                "isMerged": False,
-            }
-        )
+        line_payload: dict[str, Any] = {
+            "text": text,
+            "tightBoundingBox": tight,
+            "forcedOrientation": orientation,
+            "isMerged": False,
+        }
+        if isinstance(raw_lines, list):
+            line_payload["sourceLines"] = [str(t) for t in raw_lines if str(t).strip()]
+        font_size = blk.get("font_size")
+        if isinstance(font_size, (int, float)) and font_size > 0:
+            line_payload["fontSize"] = float(font_size)
+        lines_coords = blk.get("lines_coords")
+        if isinstance(lines_coords, list) and lines_coords:
+            coords_normalized: list[list[tuple[float, float]]] = []
+            for poly in lines_coords:
+                if not isinstance(poly, list) or len(poly) < 3:
+                    continue
+                pts: list[tuple[float, float]] = []
+                for pt in poly:
+                    if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                        pts = []
+                        break
+                    pts.append((float(pt[0]) / img_w, float(pt[1]) / img_h))
+                if pts:
+                    coords_normalized.append(pts)
+            if coords_normalized:
+                line_payload["lineCoords"] = coords_normalized
+        if isinstance(blk.get("font_size"), (int, float)):
+            line_payload["blockFontSize"] = float(blk["font_size"])
+        lines.append(line_payload)
     return lines
 
 
