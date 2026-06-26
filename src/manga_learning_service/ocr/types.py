@@ -31,6 +31,7 @@ class OcrPageRequest(BaseModel):
     chapter_id: str | None = None
     page_index: int | None = None
     force: bool = False
+    persist: bool = False
 
 
 class OcrRegionRequest(BaseModel):

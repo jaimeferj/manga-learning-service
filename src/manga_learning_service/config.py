@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     ocr_force_cpu: bool = True
     ocr_max_image_bytes: int = 50 * 1024 * 1024
     ocr_concurrency: int = 1
+    ocr_cache_ttl_seconds: int = 24 * 60 * 60
     manga_server_url: str = ""
     ocr_page_ratio_min: float = 1.25
     ocr_page_ratio_max: float = 1.85

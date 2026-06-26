@@ -172,6 +172,8 @@ async def ocr_page(payload: OcrPageRequest, request: Request) -> OcrPageResult:
     if not payload.force:
         cached = await cache.get_page(identity)
         if cached is not None:
+            if payload.persist:
+                await cache.mark_persistent(identity)
             return OcrPageResult(
                 img_width=int(cached["img_width"]),
                 img_height=int(cached["img_height"]),
@@ -179,6 +181,9 @@ async def ocr_page(payload: OcrPageRequest, request: Request) -> OcrPageResult:
                 cached=True,
                 backend=settings.ocr_backend,
             )
+
+    if payload.persist:
+        await cache.mark_persistent(identity)
 
     if not engine.ready:
         raise HTTPException(
@@ -197,6 +202,8 @@ async def ocr_page(payload: OcrPageRequest, request: Request) -> OcrPageResult:
             "img_height": img_height,
             "lines": [line.model_dump() for line in lines],
         },
+        persistent=payload.persist,
+        ttl_seconds=settings.ocr_cache_ttl_seconds,
     )
 
     return OcrPageResult(

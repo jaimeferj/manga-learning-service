@@ -139,6 +139,120 @@ def test_ocr_page_uses_cache_on_second_call(client: TestClient, monkeypatch) -> 
     assert stub.calls == 1
 
 
+def test_ocr_page_reruns_after_ttl_expires(client: TestClient, monkeypatch) -> None:
+    stub = _patch_engine(monkeypatch, client.app)
+    from manga_learning_service.ocr import routes as ocr_routes
+
+    monkeypatch.setattr(
+        "manga_learning_service.ocr.routes.get_settings",
+        lambda: Settings(ocr_cache_ttl_seconds=0),
+    )
+
+    image = Image.new("RGB", (800, 1200), color="white")
+    buf = BytesIO()
+    image.save(buf, format="PNG")
+    payload = {
+        "image_base64": base64.b64encode(buf.getvalue()).decode("ascii"),
+        "manga_id": "m1",
+        "chapter_id": "c1",
+        "page_index": 0,
+    }
+    first = client.post("/ocr/page", json=payload).json()
+    second = client.post("/ocr/page", json=payload).json()
+    assert first["cached"] is False
+    assert second["cached"] is False
+    assert stub.calls == 2
+    _ = ocr_routes  # silence unused import
+
+
+def test_ocr_page_persist_promotes_existing_cache(client: TestClient, monkeypatch) -> None:
+    stub = _patch_engine(monkeypatch, client.app)
+    from manga_learning_service.config import Settings
+
+    monkeypatch.setattr(
+        "manga_learning_service.ocr.routes.get_settings",
+        lambda: Settings(ocr_cache_ttl_seconds=60 * 60 * 24),
+    )
+
+    image = Image.new("RGB", (800, 1200), color="white")
+    buf = BytesIO()
+    image.save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    payload = {
+        "image_base64": encoded,
+        "manga_id": "m1",
+        "chapter_id": "c1",
+        "page_index": 0,
+    }
+    first = client.post("/ocr/page", json=payload).json()
+    assert first["cached"] is False
+    assert stub.calls == 1
+
+    cache = client.app.state.cache
+    pre_rows = _fetch_cache_meta(cache)
+    assert pre_rows and pre_rows[0]["persistent"] == 0
+    assert pre_rows[0]["expires_at"] is not None
+
+    promote = client.post("/ocr/page", json={**payload, "persist": True}).json()
+    assert promote["cached"] is True
+    assert stub.calls == 1
+
+    post_rows = _fetch_cache_meta(cache)
+    assert post_rows[0]["persistent"] == 1
+    assert post_rows[0]["expires_at"] is None
+
+    forced = client.post("/ocr/page", json={**payload, "persist": True, "force": True}).json()
+    assert forced["cached"] is False
+    assert stub.calls == 2
+
+
+def _fetch_cache_meta(cache) -> list[dict[str, Any]]:
+    import asyncio
+
+    async def _run() -> list[dict[str, Any]]:
+        cursor = await cache.db.execute("SELECT persistent, expires_at FROM ocr_pages")
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [{"persistent": row[0], "expires_at": row[1]} for row in rows]
+
+    return asyncio.run(_run())
+
+
+def test_ocr_page_persist_survives_ttl_expiry(client: TestClient, monkeypatch) -> None:
+    stub = _patch_engine(monkeypatch, client.app)
+    from manga_learning_service.config import Settings
+
+    monkeypatch.setattr(
+        "manga_learning_service.ocr.routes.get_settings",
+        lambda: Settings(ocr_cache_ttl_seconds=0),
+    )
+
+    image = Image.new("RGB", (800, 1200), color="white")
+    buf = BytesIO()
+    image.save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    payload = {
+        "image_base64": encoded,
+        "manga_id": "m1",
+        "chapter_id": "c1",
+        "page_index": 0,
+        "persist": True,
+    }
+    first = client.post("/ocr/page", json=payload).json()
+    assert first["cached"] is False
+    assert stub.calls == 1
+
+    # With ttl=0, normal entries would expire; persistent entries must not.
+    second = client.post("/ocr/page", json=payload).json()
+    assert second["cached"] is True
+    assert stub.calls == 1
+
+
+def test_settings_exposes_ocr_cache_ttl_default() -> None:
+    settings = Settings()
+    assert settings.ocr_cache_ttl_seconds == 24 * 60 * 60
+
+
 def test_ocr_page_fetches_image_url(client: TestClient, monkeypatch) -> None:
     stub = _patch_engine(monkeypatch, client.app)
 
