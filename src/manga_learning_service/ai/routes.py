@@ -14,7 +14,7 @@ from manga_learning_service.ai.types import (
     AiCardFieldsResponse,
     AiExplainRequest,
     AiExplainResponse,
-    AiLearningSection,
+    AiLearningPayload,
     AiLearnRequest,
     AiLearnResponse,
     parse_json_response,
@@ -56,19 +56,41 @@ async def learn(payload: AiLearnRequest) -> AiLearnResponse:
         f"Optional surrounding context:\n{context}\n\n"
         f"User level:\nSpanish-speaking Japanese learner, {payload.level}."
     )
-    raw = await provider.complete(system=SYSTEM_LEARN, user=user_prompt, max_tokens=1200)
+    if settings.debug:
+        logger.info(
+            "AI learn query provider=%s action=%s\nSYSTEM:\n%s\nUSER:\n%s",
+            provider.name,
+            payload.action,
+            SYSTEM_LEARN,
+            user_prompt,
+        )
+    try:
+        raw = await provider.complete(system=SYSTEM_LEARN, user=user_prompt, max_tokens=2048)
+    except Exception as exc:
+        logger.exception(
+            "AI learn provider request failed provider=%s action=%s",
+            provider.name,
+            payload.action,
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"AI provider request failed: {type(exc).__name__}",
+        ) from exc
+    if settings.debug:
+        logger.info(
+            "AI learn response provider=%s action=%s\nRAW:\n%s",
+            provider.name,
+            payload.action,
+            raw,
+        )
     try:
         data = parse_json_response(provider.name, raw)
-        raw_sections = data.get("sections", [])
-        sections = [
-            AiLearningSection(label=str(item["label"]), content=str(item["content"]))
-            for item in raw_sections
-            if isinstance(item, dict) and item.get("label") and item.get("content")
-        ]
-    except (KeyError, TypeError, ValueError) as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"invalid AI learning response: {exc}") from exc
-    if not sections:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "AI provider returned no learning sections")
+        sections = AiLearningPayload.model_validate(data).sections
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"AI provider returned an invalid learning schema: {exc}",
+        ) from exc
     return AiLearnResponse(
         provider=provider.name,
         action=payload.action,

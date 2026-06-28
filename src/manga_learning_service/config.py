@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,10 +33,16 @@ class Settings(BaseSettings):
 
     ai_provider: str = "minimax"
     ai_enabled: bool = False
+    debug: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("DEBUG", "MANGA_LEARNING_DEBUG"),
+    )
 
     ai_minimax_api_key: str = ""
-    ai_minimax_base_url: str = "https://api.minimax.io/v1"
+    ai_minimax_base_url: str = "https://api.minimax.io/anthropic"
     ai_minimax_model: str = "MiniMax-M3"
+    ai_minimax_timeout_seconds: float = 90.0
+    ai_minimax_thinking: bool = False
 
     ai_openai_api_key: str = ""
     ai_openai_model: str = "gpt-4o-mini"

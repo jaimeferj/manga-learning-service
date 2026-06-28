@@ -57,8 +57,12 @@ class _OpenAiCompatibleProvider(AiProvider):
                 {"role": "user", "content": user},
             ],
             "temperature": temperature,
-            "max_tokens": max_tokens,
         }
+        if self.name == "minimax":
+            body["max_completion_tokens"] = max_tokens
+            body["reasoning_split"] = True
+        else:
+            body["max_tokens"] = max_tokens
         client = self.client or _default_client(self.timeout_seconds)
         owns_client = self.client is None
         try:
@@ -78,16 +82,57 @@ class _OpenAiCompatibleProvider(AiProvider):
         return str(choices[0]["message"]["content"]).strip()
 
 
-class MinimaxProvider(_OpenAiCompatibleProvider):
+class MinimaxProvider(AiProvider):
+    name = "minimax"
+
     def __init__(self, settings: Settings, *, client: httpx.AsyncClient | None = None) -> None:
-        super().__init__(
-            name="minimax",
-            base_url=settings.ai_minimax_base_url,
-            api_key=settings.ai_minimax_api_key,
-            model=settings.ai_minimax_model,
-            api_key_env="MANGA_LEARNING_AI_MINIMAX_API_KEY",
-            client=client,
-        )
+        self._settings = settings
+        self._client = client
+        self.timeout_seconds = settings.ai_minimax_timeout_seconds
+
+    async def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        temperature: float = 0.2,
+        max_tokens: int = 600,
+    ) -> str:
+        api_key = self._settings.ai_minimax_api_key
+        if not api_key:
+            raise RuntimeError("minimax API key not set (MANGA_LEARNING_AI_MINIMAX_API_KEY)")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        body: dict[str, object] = {
+            "model": self._settings.ai_minimax_model,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if self._settings.ai_minimax_thinking:
+            body["thinking"] = {"type": "adaptive"}
+        url = self._settings.ai_minimax_base_url.rstrip("/") + "/v1/messages"
+        client = self._client or _default_client(self.timeout_seconds)
+        owns_client = self._client is None
+        try:
+            response = await client.post(url, headers=headers, json=body)
+        finally:
+            if owns_client:
+                await client.aclose()
+        response.raise_for_status()
+        data = response.json()
+        parts = data.get("content") or []
+        text_parts = [
+            str(part.get("text", ""))
+            for part in parts
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        if not text_parts:
+            raise RuntimeError("minimax returned no text content")
+        return "\n".join(text_parts).strip()
 
 
 class OpenAiProvider(_OpenAiCompatibleProvider):

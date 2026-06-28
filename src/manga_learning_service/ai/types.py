@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,16 @@ class AiLearnRequest(BaseModel):
 
 
 class AiLearningSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     label: str
     content: str
+
+
+class AiLearningPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sections: list[AiLearningSection] = Field(min_length=1)
 
 
 class AiLearnResponse(BaseModel):
@@ -76,8 +84,13 @@ SYSTEM_LEARN = """You are a Japanese tutor specialized in helping Spanish-speaki
 Explain in Spanish, use natural Japanese, and add furigana when helpful. Be practical and concise.
 Distinguish literal from natural meaning, explain important omissions, and identify manga-like language.
 Never invent context; state uncertainty when context is insufficient.
-Return only JSON with a `sections` array. Every item must have string fields `label` and `content`.
-Do not use markdown code fences."""
+Return exactly one JSON object matching this schema:
+{"sections":[{"label":"Short section title","content":"Section explanation"}]}
+The top-level object may contain only `sections`. Every section may contain only the string fields
+`label` and `content`. Never replace them with action-specific fields, named objects, `items`, or arrays
+of another shape. Use the same schema for every action.
+Keep every `content` under 500 characters and the complete response under 3000 characters.
+Output the JSON object only, without commentary or markdown fences."""
 
 
 ACTION_PROMPTS: dict[AiLearningAction, str] = {
@@ -120,9 +133,16 @@ def parse_json_response(provider: str, raw: str) -> dict[str, Any]:
         ).strip()
     try:
         data = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        logger.warning("provider %s returned non-json: %s", provider, cleaned[:200])
-        raise ValueError(f"provider {provider} returned non-json output: {exc}") from exc
+    except json.JSONDecodeError as initial_exc:
+        decoder = json.JSONDecoder()
+        object_start = cleaned.find("{")
+        try:
+            data, _end = decoder.raw_decode(cleaned[object_start:])
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("provider %s returned non-json: %s", provider, cleaned[:200])
+            raise ValueError(
+                f"provider {provider} returned non-json output: {initial_exc}"
+            ) from initial_exc
     if not isinstance(data, dict):
         raise ValueError(f"provider {provider} returned non-object json")
     return data
