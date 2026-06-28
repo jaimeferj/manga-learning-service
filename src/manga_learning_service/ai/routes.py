@@ -6,12 +6,17 @@ from fastapi import APIRouter, HTTPException, status
 
 from manga_learning_service.ai.providers import build_provider
 from manga_learning_service.ai.types import (
+    ACTION_PROMPTS,
     SYSTEM_CARD_FIELDS,
     SYSTEM_EXPLAIN,
+    SYSTEM_LEARN,
     AiCardFieldsRequest,
     AiCardFieldsResponse,
     AiExplainRequest,
     AiExplainResponse,
+    AiLearningSection,
+    AiLearnRequest,
+    AiLearnResponse,
     parse_json_response,
 )
 from manga_learning_service.config import get_settings
@@ -27,6 +32,49 @@ async def ai_status() -> dict[str, str]:
         "provider": settings.ai_provider,
         "enabled": "true" if settings.ai_enabled else "false",
     }
+
+
+@router.post("/learn", response_model=AiLearnResponse)
+async def learn(payload: AiLearnRequest) -> AiLearnResponse:
+    settings = get_settings()
+    if not settings.ai_enabled:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "AI disabled (set MANGA_LEARNING_AI_ENABLED=true)",
+        )
+    provider = build_provider(settings)
+    context_lines = [
+        f"Previous line: 「{payload.context.previous_line}」" if payload.context.previous_line else None,
+        f"Next line: 「{payload.context.next_line}」" if payload.context.next_line else None,
+        f"Speaker: {payload.context.speaker}" if payload.context.speaker else None,
+        f"Scene/context: {payload.context.scene}" if payload.context.scene else None,
+    ]
+    context = "\n".join(line for line in context_lines if line) or "No surrounding context supplied."
+    user_prompt = (
+        f"Task: {ACTION_PROMPTS[payload.action]}\n\n"
+        f"Manga sentence:\n「{payload.sentence}」\n\n"
+        f"Optional surrounding context:\n{context}\n\n"
+        f"User level:\nSpanish-speaking Japanese learner, {payload.level}."
+    )
+    raw = await provider.complete(system=SYSTEM_LEARN, user=user_prompt, max_tokens=1200)
+    try:
+        data = parse_json_response(provider.name, raw)
+        raw_sections = data.get("sections", [])
+        sections = [
+            AiLearningSection(label=str(item["label"]), content=str(item["content"]))
+            for item in raw_sections
+            if isinstance(item, dict) and item.get("label") and item.get("content")
+        ]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"invalid AI learning response: {exc}") from exc
+    if not sections:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "AI provider returned no learning sections")
+    return AiLearnResponse(
+        provider=provider.name,
+        action=payload.action,
+        sentence=payload.sentence,
+        sections=sections,
+    )
 
 
 @router.post("/explain", response_model=AiExplainResponse)
